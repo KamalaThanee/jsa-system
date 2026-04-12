@@ -69,7 +69,7 @@ async function tryGemini(prompt: string): Promise<AIResponse> {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: 'google/gemma-4-31b-it:free',
+      model: 'gemini-3-flash-preview',
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: 4000,
