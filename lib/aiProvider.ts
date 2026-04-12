@@ -1,14 +1,16 @@
-// AI Provider Service with Auto-Failover
-// Supports: Gemini (Free) → OpenRouter → Anthropic
+// AI Provider Service with 3-Tier Auto-Failover
+// Tier 1: Gemini 2.5 Flash (Free) → Tier 2: Llama 3.1 405B (Free) → Tier 3: DeepSeek V3 (Paid $0.27/1M)
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export type AIProvider = 'gemini' | 'openrouter' | 'anthropic';
+export type AIProvider = 'gemini' | 'openrouter-free' | 'openrouter-paid';
 
 interface AIResponse {
   text: string;
   provider: AIProvider;
+  model?: string;
   tokensUsed?: number;
+  cost?: number;
 }
 
 interface AIError {
@@ -58,7 +60,7 @@ function isRateLimitError(error: any): boolean {
   );
 }
 
-// Try Gemini API (Free)
+// Tier 1: Gemini 2.5 Flash (Free - 1,500 requests/day)
 async function tryGemini(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
   
@@ -69,7 +71,7 @@ async function tryGemini(prompt: string): Promise<AIResponse> {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: 4000,
@@ -96,7 +98,9 @@ async function tryGemini(prompt: string): Promise<AIResponse> {
     return {
       text,
       provider: 'gemini',
+      model: 'gemini-2.5-flash',
       tokensUsed: response.usageMetadata?.totalTokenCount,
+      cost: 0,
     };
   } catch (error: any) {
     throw {
@@ -107,8 +111,8 @@ async function tryGemini(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Try OpenRouter API
-async function tryOpenRouter(prompt: string): Promise<AIResponse> {
+// Tier 2: Meta Llama 3.1 405B Instruct (Free - Best free model)
+async function tryOpenRouterFree(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   
   if (!apiKey) {
@@ -125,7 +129,7 @@ async function tryOpenRouter(prompt: string): Promise<AIResponse> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'nvidia/nemotron-3-super-120b-a12b:free', // Free model
+        model: 'meta-llama/llama-3.1-405b-instruct:free',
         messages: [
           {
             role: 'system',
@@ -151,34 +155,102 @@ async function tryOpenRouter(prompt: string): Promise<AIResponse> {
 
     return {
       text,
-      provider: 'openrouter',
+      provider: 'openrouter-free',
+      model: 'llama-3.1-405b',
       tokensUsed: data.usage?.total_tokens,
+      cost: 0,
     };
   } catch (error: any) {
     throw {
-      provider: 'openrouter',
-      error: error.message || 'OpenRouter API failed',
+      provider: 'openrouter-free',
+      error: error.message || 'OpenRouter Free API failed',
       isRateLimitError: isRateLimitError(error),
     } as AIError;
   }
 }
 
-// Main function with auto-failover (Gemini → OpenRouter only)
+// Tier 3: DeepSeek V3 (Paid - $0.27 per 1M tokens - Cheapest quality model)
+async function tryOpenRouterPaid(prompt: string): Promise<AIResponse> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('OPENROUTER_API_KEY not configured');
+  }
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+        'X-Title': 'JSA System',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'deepseek/deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || `OpenRouter API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const text = data.choices[0]?.message?.content || '';
+    const tokensUsed = data.usage?.total_tokens || 0;
+    
+    // DeepSeek V3: $0.27 per 1M tokens
+    const cost = (tokensUsed / 1000000) * 0.27;
+
+    return {
+      text,
+      provider: 'openrouter-paid',
+      model: 'deepseek-v3',
+      tokensUsed,
+      cost,
+    };
+  } catch (error: any) {
+    throw {
+      provider: 'openrouter-paid',
+      error: error.message || 'OpenRouter Paid API failed',
+      isRateLimitError: isRateLimitError(error),
+    } as AIError;
+  }
+}
+
+// Main function with 3-tier auto-failover
 export async function analyzeWithAI(prompt: string): Promise<AIResponse> {
   const providers: Array<() => Promise<AIResponse>> = [
-    () => tryGemini(prompt),
-    () => tryOpenRouter(prompt),
+    () => tryGemini(prompt),              // Tier 1: Gemini 2.5 Flash (Free)
+    () => tryOpenRouterFree(prompt),      // Tier 2: Llama 3.1 405B (Free)
+    () => tryOpenRouterPaid(prompt),      // Tier 3: DeepSeek V3 ($0.27/1M)
   ];
 
   const errors: AIError[] = [];
 
-  // Try each provider in order
   for (const tryProvider of providers) {
     try {
       const response = await tryProvider();
       
-      // Log success for monitoring
-      console.log(`✅ AI Analysis successful via ${response.provider}`);
+      // Log success
+      const costInfo = response.cost && response.cost > 0 
+        ? ` (cost: $${response.cost.toFixed(4)})` 
+        : ' (FREE ✅)';
+      console.log(`✅ AI via ${response.provider} - ${response.model}${costInfo}`);
+      
       if (errors.length > 0) {
         console.log(`⚠️ Previous failures:`, errors.map(e => `${e.provider}: ${e.error}`));
       }
@@ -187,30 +259,27 @@ export async function analyzeWithAI(prompt: string): Promise<AIResponse> {
     } catch (error: any) {
       errors.push(error as AIError);
       
-      // If it's a rate limit error, log and continue to next provider
       if (error.isRateLimitError) {
-        console.log(`⏱️ Rate limit hit on ${error.provider}, trying next provider...`);
+        console.log(`⏱️ Rate limit on ${error.provider}, trying next...`);
         continue;
       }
       
-      // If it's a configuration error (no API key), skip to next
       if (error.error?.includes('not configured')) {
-        console.log(`⚙️ ${error.provider} not configured, trying next provider...`);
+        console.log(`⚙️ ${error.provider} not configured, trying next...`);
         continue;
       }
       
-      // For other errors, log but continue
-      console.log(`❌ ${error.provider} failed: ${error.error}, trying next provider...`);
+      console.log(`❌ ${error.provider} failed: ${error.error}, trying next...`);
       continue;
     }
   }
 
-  // All providers failed
+  // All failed
   const errorMessages = errors.map(e => `${e.provider}: ${e.error}`).join('; ');
   throw new Error(`All AI providers failed. Errors: ${errorMessages}`);
 }
 
-// Get current provider status
+// Get provider status
 export async function getProviderStatus(): Promise<{
   gemini: boolean;
   openrouter: boolean;
