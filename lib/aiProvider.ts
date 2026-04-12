@@ -69,7 +69,7 @@ async function tryGemini(prompt: string): Promise<AIResponse> {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.5-flash',
+      model: 'google/gemma-4-31b-it:free',
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: 4000,
@@ -125,7 +125,7 @@ async function tryOpenRouter(prompt: string): Promise<AIResponse> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-exp:free', // Free model
+        model: 'nvidia/nemotron-3-super-120b-a12b:free', // Free model
         messages: [
           {
             role: 'system',
