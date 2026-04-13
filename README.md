@@ -23,10 +23,6 @@ The system now supports **100% FREE AI providers** with automatic failover:
    - Free models available
    - Automatic failover when Gemini reaches limit
 
-3. **Anthropic Claude** (Optional - Paid)
-   - Use as final fallback
-   - Best quality but costs ~$0.003/JSA
-
 **📖 See [FREE_AI_SETUP.md](FREE_AI_SETUP.md) for detailed setup guide**
 
 ### Quick Setup
