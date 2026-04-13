@@ -326,3 +326,4 @@ Potential features for future versions:
 ---
 
 **Built for offshore safety excellence** 🛡️
+

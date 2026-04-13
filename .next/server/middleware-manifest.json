@@ -1,0 +1,34 @@
+{
+  "version": 3,
+  "middleware": {},
+  "functions": {
+    "/api/analyze/route": {
+      "files": [
+        "server/middleware-build-manifest.js",
+        "server/middleware-react-loadable-manifest.js",
+        "server/next-font-manifest.js",
+        "server/interception-route-rewrite-manifest.js",
+        "server/edge-runtime-webpack.js",
+        "server/app/api/analyze/route.js"
+      ],
+      "name": "app/api/analyze/route",
+      "page": "/api/analyze/route",
+      "matchers": [
+        {
+          "regexp": "^/api/analyze$",
+          "originalSource": "/api/analyze"
+        }
+      ],
+      "wasm": [],
+      "assets": [],
+      "env": {
+        "__NEXT_BUILD_ID": "cUg-P0tHYbF5Md8MSVt7V",
+        "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "psTxz7hjIyIX5KO317ldla5arpmvlTM3mO2wUoCdLcw=",
+        "__NEXT_PREVIEW_MODE_ID": "fef73c1c46012bb311775d1798c020d5",
+        "__NEXT_PREVIEW_MODE_ENCRYPTION_KEY": "e52b9f4cece25a429ac994bdb056cca10ffc2c6e890495fa872b6ff029f0e17e",
+        "__NEXT_PREVIEW_MODE_SIGNING_KEY": "8fe25ea7619589e2c4eb5be11a73d3928c030d8c5a5cd8b4796a1c899726475f"
+      }
+    }
+  },
+  "sortedMiddleware": []
+}
