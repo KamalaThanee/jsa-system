@@ -3,6 +3,31 @@ import { analyzeWithAI, getProviderStatus } from '@/lib/aiProvider';
 
 export const runtime = 'edge';
 
+// Clean and extract JSON from AI response
+function extractJSON(text: string): any {
+  // Remove markdown code blocks
+  let cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+  
+  // Try to find JSON object
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
+  }
+  
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    // If parsing fails, try to fix common issues
+    cleaned = cleaned
+      .replace(/,\s*}/g, '}')  // Remove trailing commas
+      .replace(/,\s*]/g, ']')  // Remove trailing commas in arrays
+      .replace(/(\w+):/g, '"$1":')  // Quote unquoted keys
+      .replace(/'/g, '"');  // Replace single quotes with double quotes
+    
+    return JSON.parse(cleaned);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -15,83 +40,99 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if at least one AI provider is configured
+    // Check providers
     const status = await getProviderStatus();
     if (!status.gemini && !status.openrouter) {
       return NextResponse.json(
-        { error: 'No AI provider configured. Please set GEMINI_API_KEY or OPENROUTER_API_KEY' },
+        { error: 'No AI provider configured' },
         { status: 500 }
       );
     }
 
-    const userPrompt = `Analyze this offshore work task and create a detailed JSA:
+    const userPrompt = `Analyze this offshore work task and create a JSA:
 
 Job Description: ${jobDescription}
 Vessel Type: ${vesselType || 'Accommodation Work Barge'}
 Work Location: ${workLocation || 'Offshore'}
 
-Break down the job into 4-8 sequential steps. For each step:
-1. Identify ALL applicable hazards from Energy Wheel categories
-2. Assess Initial Risk (before controls) - be realistic about offshore risks
-3. Recommend specific, practical control measures
-4. Assess Residual Risk (after controls)
-5. Assign responsibility
+Break down into 4-8 steps. For each step identify hazards, assess risks, recommend controls.
 
-Respond ONLY with this JSON structure (no markdown, no code blocks):
+Respond with ONLY this JSON structure (no markdown, no explanations):
 {
   "jobSteps": [
     {
       "stepNumber": 1,
-      "description": "Clear, specific step description",
+      "description": "Step description",
       "hazards": [
         {
           "category": "Mechanical",
-          "hazard": "Specific hazard from Energy Wheel",
-          "description": "Brief explanation of the hazard"
+          "hazard": "Specific hazard",
+          "description": "Brief explanation"
         }
       ],
       "initialSeverity": 3,
       "initialLikelihood": "C",
-      "controlMeasures": [
-        "Specific control measure 1",
-        "Specific control measure 2"
-      ],
+      "controlMeasures": ["Control 1", "Control 2"],
       "residualSeverity": 2,
       "residualLikelihood": "B",
-      "responsibility": "Who is responsible (e.g., Crane Operator, Safety Officer, Work Supervisor)"
+      "responsibility": "Who is responsible"
     }
   ]
 }`;
 
-    // Use AI provider service with auto-failover
+    // Get AI response
     const aiResponse = await analyzeWithAI(userPrompt);
 
-    // Parse the JSON response
+    // Try to parse JSON with better error handling
     let analysisData;
     try {
-      // Remove any markdown code blocks if present
-      let jsonText = aiResponse.text.trim();
-      if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-      }
-      analysisData = JSON.parse(jsonText);
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', aiResponse.text);
-      throw new Error('Invalid JSON response from AI');
+      analysisData = extractJSON(aiResponse.text);
+    } catch (parseError: any) {
+      console.error('JSON Parse Error:', parseError);
+      console.error('AI Response:', aiResponse.text.substring(0, 500));
+      
+      // Return the error with partial response for debugging
+      return NextResponse.json(
+        { 
+          error: 'AI response was not valid JSON',
+          details: parseError.message,
+          provider: aiResponse.provider,
+          model: aiResponse.model,
+          preview: aiResponse.text.substring(0, 200) + '...'
+        },
+        { status: 500 }
+      );
     }
 
-    // Add metadata about which provider was used
+    // Validate structure
+    if (!analysisData.jobSteps || !Array.isArray(analysisData.jobSteps)) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid response structure - missing jobSteps array',
+          provider: aiResponse.provider,
+          model: aiResponse.model
+        },
+        { status: 500 }
+      );
+    }
+
+    // Return successful response
     return NextResponse.json({
       ...analysisData,
       _meta: {
         provider: aiResponse.provider,
+        model: aiResponse.model,
         tokensUsed: aiResponse.tokensUsed,
+        cost: aiResponse.cost,
       },
     });
   } catch (error: any) {
     console.error('Analysis error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to analyze job' },
+      { 
+        error: error.message || 'Failed to analyze job',
+        details: error.toString()
+      },
       { status: 500 }
     );
   }
