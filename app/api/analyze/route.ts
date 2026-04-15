@@ -3,28 +3,56 @@ import { analyzeWithAI, getProviderStatus } from '@/lib/aiProvider';
 
 export const runtime = 'edge';
 
-// Clean and extract JSON from AI response
-function extractJSON(text: string): any {
-  // Remove markdown code blocks
-  let cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+function aggressiveJsonClean(text: string): string {
+  // Remove all markdown
+  let cleaned = text
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .replace(/^[^{]*/, '')  // Remove everything before first {
+    .replace(/[^}]*$/, '')  // Remove everything after last }
+    .trim();
   
-  // Try to find JSON object
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    cleaned = jsonMatch[0];
+  // Find the JSON object
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) {
+    cleaned = match[0];
   }
   
+  return cleaned;
+}
+
+function parseAIResponse(text: string): any {
+  // Try 1: Direct parse
   try {
+    return JSON.parse(text);
+  } catch (e1) {
+    console.log('Try 1 failed, cleaning...');
+  }
+  
+  // Try 2: Clean and parse
+  try {
+    const cleaned = aggressiveJsonClean(text);
     return JSON.parse(cleaned);
-  } catch (e) {
-    // If parsing fails, try to fix common issues
-    cleaned = cleaned
-      .replace(/,\s*}/g, '}')  // Remove trailing commas
-      .replace(/,\s*]/g, ']')  // Remove trailing commas in arrays
-      .replace(/(\w+):/g, '"$1":')  // Quote unquoted keys
-      .replace(/'/g, '"');  // Replace single quotes with double quotes
-    
-    return JSON.parse(cleaned);
+  } catch (e2) {
+    console.log('Try 2 failed, fixing syntax...');
+  }
+  
+  // Try 3: Fix common JSON errors
+  try {
+    let fixed = aggressiveJsonClean(text)
+      .replace(/,\s*}/g, '}')
+      .replace(/,\s*]/g, ']')
+      .replace(/(\w+):/g, '"$1":')
+      .replace(/'/g, '"')
+      .replace(/\n/g, ' ')
+      .replace(/\r/g, ' ')
+      .replace(/\t/g, ' ')
+      .replace(/\s+/g, ' ');
+    return JSON.parse(fixed);
+  } catch (e3) {
+    console.error('All parsing attempts failed');
+    console.error('Original text:', text.substring(0, 500));
+    throw new Error('Could not parse AI response as JSON after 3 attempts');
   }
 }
 
@@ -34,106 +62,64 @@ export async function POST(request: Request) {
     const { jobDescription, vesselType, workLocation } = body;
 
     if (!jobDescription) {
-      return NextResponse.json(
-        { error: 'Job description is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Job description required' }, { status: 400 });
     }
 
-    // Check providers
     const status = await getProviderStatus();
     if (!status.gemini && !status.openrouter) {
-      return NextResponse.json(
-        { error: 'No AI provider configured' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'No AI provider configured' }, { status: 500 });
     }
 
-    const userPrompt = `Analyze this offshore work task and create a JSA:
+    const userPrompt = `Job: ${jobDescription}
+Vessel: ${vesselType || 'Work Barge'}
+Location: ${workLocation || 'Offshore'}
 
-Job Description: ${jobDescription}
-Vessel Type: ${vesselType || 'Accommodation Work Barge'}
-Work Location: ${workLocation || 'Offshore'}
+Create JSA with 4-8 steps. Output ONLY valid JSON with this structure (no text before or after):
+{"jobSteps":[{"stepNumber":1,"description":"text","hazards":[{"category":"Mechanical","hazard":"text","description":"text"}],"initialSeverity":3,"initialLikelihood":"C","controlMeasures":["text"],"residualSeverity":2,"residualLikelihood":"B","responsibility":"text"}]}`;
 
-Break down into 4-8 steps. For each step identify hazards, assess risks, recommend controls.
-
-Respond with ONLY this JSON structure (no markdown, no explanations):
-{
-  "jobSteps": [
-    {
-      "stepNumber": 1,
-      "description": "Step description",
-      "hazards": [
-        {
-          "category": "Mechanical",
-          "hazard": "Specific hazard",
-          "description": "Brief explanation"
-        }
-      ],
-      "initialSeverity": 3,
-      "initialLikelihood": "C",
-      "controlMeasures": ["Control 1", "Control 2"],
-      "residualSeverity": 2,
-      "residualLikelihood": "B",
-      "responsibility": "Who is responsible"
-    }
-  ]
-}`;
-
-    // Get AI response
+    console.log('Calling AI...');
     const aiResponse = await analyzeWithAI(userPrompt);
+    console.log(`AI Response from ${aiResponse.model}:`, aiResponse.text.substring(0, 200));
 
-    // Try to parse JSON with better error handling
     let analysisData;
     try {
-      analysisData = extractJSON(aiResponse.text);
+      analysisData = parseAIResponse(aiResponse.text);
     } catch (parseError: any) {
-      console.error('JSON Parse Error:', parseError);
-      console.error('AI Response:', aiResponse.text.substring(0, 500));
+      console.error('Parse error:', parseError.message);
       
-      // Return the error with partial response for debugging
-      return NextResponse.json(
-        { 
-          error: 'AI response was not valid JSON',
-          details: parseError.message,
-          provider: aiResponse.provider,
-          model: aiResponse.model,
-          preview: aiResponse.text.substring(0, 200) + '...'
-        },
-        { status: 500 }
-      );
+      return NextResponse.json({
+        error: 'AI response was not valid JSON',
+        provider: aiResponse.provider,
+        model: aiResponse.model,
+        preview: aiResponse.text.substring(0, 300),
+        parseError: parseError.message,
+      }, { status: 500 });
     }
 
-    // Validate structure
     if (!analysisData.jobSteps || !Array.isArray(analysisData.jobSteps)) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid response structure - missing jobSteps array',
-          provider: aiResponse.provider,
-          model: aiResponse.model
-        },
-        { status: 500 }
-      );
+      console.error('Invalid structure:', analysisData);
+      return NextResponse.json({
+        error: 'Response missing jobSteps array',
+        provider: aiResponse.provider,
+        model: aiResponse.model,
+        received: analysisData,
+      }, { status: 500 });
     }
 
-    // Return successful response
     return NextResponse.json({
       ...analysisData,
       _meta: {
         provider: aiResponse.provider,
         model: aiResponse.model,
         tokensUsed: aiResponse.tokensUsed,
-        cost: aiResponse.cost,
+        cost: aiResponse.cost || 0,
       },
     });
   } catch (error: any) {
     console.error('Analysis error:', error);
-    return NextResponse.json(
-      { 
-        error: error.message || 'Failed to analyze job',
-        details: error.toString()
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: error.message || 'Failed to analyze',
+      stack: error.stack?.substring(0, 500),
+    }, { status: 500 });
   }
 }
