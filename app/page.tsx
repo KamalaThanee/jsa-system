@@ -1,76 +1,111 @@
+'use client';
+
+import { useState } from 'react';
 import JSAForm from '@/components/JSAForm';
-import EnergyWheelDisplay from '@/components/EnergyWheelDisplay';
-import { Shield, Zap } from 'lucide-react';
+import { JobStep } from '@/types';
 
 export default function Home() {
+  const [analysis, setAnalysis] = useState<{ jobSteps: JobStep[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+
+  const handleAnalyze = async (data: {
+    jobDescription: string;
+    vesselType?: string;
+    workLocation?: string;
+  }) => {
+    setLoading(true);
+    setError(null);
+    setDebugInfo(null);
+    
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+      
+      if (!response.ok) {
+        console.error('❌ API Error:', result);
+        setDebugInfo(result);
+        setError(result.error || 'Analysis failed');
+        return;
+      }
+
+      console.log('✅ Success:', result._meta);
+      setAnalysis(result);
+    } catch (err: any) {
+      console.error('❌ Request failed:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <main className="min-h-screen pb-12">
-      {/* Navigation Bar */}
-      <nav className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="bg-blue-600 rounded-lg p-2">
-                <Shield className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">JSA System</h1>
-                <p className="text-xs text-gray-600">Offshore Safety Analysis Platform</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <Zap className="w-4 h-4 text-blue-600" />
-              <span>Powered by Claude AI</span>
-            </div>
-          </div>
-        </div>
-      </nav>
+    <main className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto py-8 px-4">
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-blue-600">
+            Job Safety Analysis (JSA)
+          </h1>
+          <p className="text-gray-600 mt-2">
+            AI-powered safety analysis for offshore operations
+          </p>
+        </header>
 
-      {/* Main Content */}
-      <div className="py-8">
-        <JSAForm />
+        <JSAForm
+          onAnalyze={handleAnalyze}
+          loading={loading}
+          analysis={analysis}
+        />
+
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded">
+            <h3 className="font-bold text-red-800">Error:</h3>
+            <p className="text-red-700">{error}</p>
+            
+            {debugInfo && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-red-600 font-semibold">
+                  🔍 Debug Info (click to expand)
+                </summary>
+                <div className="mt-2 p-4 bg-white border rounded text-xs">
+                  <div className="mb-2">
+                    <strong>Provider:</strong> {debugInfo.provider || 'unknown'}
+                  </div>
+                  <div className="mb-2">
+                    <strong>Model:</strong> {debugInfo.model || 'unknown'}
+                  </div>
+                  {debugInfo.preview && (
+                    <div className="mb-2">
+                      <strong>AI Response Preview:</strong>
+                      <pre className="mt-1 p-2 bg-gray-100 overflow-auto max-h-60 text-xs whitespace-pre-wrap">
+                        {debugInfo.preview}
+                      </pre>
+                    </div>
+                  )}
+                  {debugInfo.parseError && (
+                    <div className="mb-2">
+                      <strong>Parse Error:</strong>
+                      <pre className="mt-1 p-2 bg-gray-100">{debugInfo.parseError}</pre>
+                    </div>
+                  )}
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-blue-600">Full Debug Object</summary>
+                    <pre className="mt-1 p-2 bg-gray-100 overflow-auto max-h-40 text-xs">
+                      {JSON.stringify(debugInfo, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              </details>
+            )}
+          </div>
+        )}
       </div>
-
-      {/* Energy Wheel Section */}
-      <div className="max-w-7xl mx-auto px-6 mt-8">
-        <EnergyWheelDisplay />
-      </div>
-
-      {/* Footer */}
-      <footer className="mt-16 border-t border-gray-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">About JSA System</h3>
-              <p className="text-sm text-gray-600">
-                AI-powered Job Safety Analysis platform designed specifically for offshore
-                accommodation work barges, utilizing Chevron Energy Wheel methodology.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Features</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• AI-powered hazard identification</li>
-                <li>• Chevron Energy Wheel framework</li>
-                <li>• Automated risk assessment</li>
-                <li>• Word document export</li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Safety Standards</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• ISO 45001 aligned</li>
-                <li>• Offshore industry best practices</li>
-                <li>• Company risk matrix compliant</li>
-                <li>• Continuous improvement focused</li>
-              </ul>
-            </div>
-          </div>
-          <div className="mt-8 pt-8 border-t border-gray-200 text-center text-sm text-gray-600">
-            <p>© {new Date().getFullYear()} JSA System. Built for offshore safety excellence.</p>
-          </div>
-        </div>
-      </footer>
     </main>
   );
 }
