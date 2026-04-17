@@ -1,4 +1,4 @@
-// 6-Tier AI: Gemma 31B → Gemini 2.5 Flash → Nemotron 120B → Gemini 2.5 Flash Lite → Minimax M2.5 → DeepSeek V3.2
+// 6-Tier AI with extended token limit
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -18,28 +18,12 @@ interface AIError {
   isRateLimitError: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a Safety Officer expert for offshore JSA analysis.
-
-Respond ONLY with valid JSON. No markdown, no explanations, no code blocks.
+const SYSTEM_PROMPT = `You are a JSA safety expert. Respond ONLY with valid JSON.
 
 Format:
-{
-  "jobSteps": [
-    {
-      "stepNumber": 1,
-      "description": "Step description",
-      "hazards": [{"category": "Mechanical", "hazard": "Specific hazard", "description": "Brief explanation"}],
-      "initialSeverity": 3,
-      "initialLikelihood": "C",
-      "controlMeasures": ["Control 1", "Control 2"],
-      "residualSeverity": 2,
-      "residualLikelihood": "B",
-      "responsibility": "Role"
-    }
-  ]
-}
+{"jobSteps":[{"stepNumber":1,"description":"text","hazards":[{"category":"Mechanical","hazard":"text","description":"text"}],"initialSeverity":3,"initialLikelihood":"C","controlMeasures":["text"],"residualSeverity":2,"residualLikelihood":"B","responsibility":"text"}]}
 
-Energy Wheel: Mechanical, Electrical, Thermal, Chemical, Radiation, Biological, Gravitational, Pressure, Motion, Sound
+Categories: Mechanical, Electrical, Thermal, Chemical, Radiation, Biological, Gravitational, Pressure, Motion, Sound
 Severity: 1-5, Likelihood: A-E`;
 
 function isRateLimitError(error: any): boolean {
@@ -57,7 +41,7 @@ function cleanJsonResponse(text: string): string {
   return cleaned.trim();
 }
 
-// Tier 1: Gemma 4 31B (OpenRouter)
+// Tier 1: Gemma 4 31B
 async function tryGemma31B(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY not configured');
@@ -78,7 +62,7 @@ async function tryGemma31B(prompt: string): Promise<AIResponse> {
           { role: 'user', content: prompt },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: 8000,
       }),
     });
 
@@ -100,7 +84,7 @@ async function tryGemma31B(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Tier 2: Gemini 2.5 Flash (Google)
+// Tier 2: Gemini 2.5 Flash
 async function tryGemini25Flash(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
@@ -109,7 +93,10 @@ async function tryGemini25Flash(prompt: string): Promise<AIResponse> {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-2.5-flash',
-      generationConfig: { temperature: 0.7, maxOutputTokens: 4000 },
+      generationConfig: { 
+        temperature: 0.7, 
+        maxOutputTokens: 8192,
+      },
     });
 
     const result = await model.generateContent([SYSTEM_PROMPT, prompt]);
@@ -127,7 +114,7 @@ async function tryGemini25Flash(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Tier 3: Nemotron 120B (OpenRouter)
+// Tier 3: Nemotron 120B
 async function tryNemotron120B(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY not configured');
@@ -148,7 +135,7 @@ async function tryNemotron120B(prompt: string): Promise<AIResponse> {
           { role: 'user', content: prompt },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: 8000,
       }),
     });
 
@@ -170,7 +157,7 @@ async function tryNemotron120B(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Tier 4: Gemini 2.5 Flash Lite (Google)
+// Tier 4: Gemini 2.5 Flash Lite
 async function tryGemini25Lite(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
@@ -179,7 +166,10 @@ async function tryGemini25Lite(prompt: string): Promise<AIResponse> {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-2.5-flash-lite',
-      generationConfig: { temperature: 0.7, maxOutputTokens: 4000 },
+      generationConfig: { 
+        temperature: 0.7, 
+        maxOutputTokens: 8192,
+      },
     });
 
     const result = await model.generateContent([SYSTEM_PROMPT, prompt]);
@@ -197,7 +187,7 @@ async function tryGemini25Lite(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Tier 5: Minimax M2.5 (OpenRouter)
+// Tier 5: Minimax M2.5
 async function tryMinimax(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY not configured');
@@ -218,7 +208,7 @@ async function tryMinimax(prompt: string): Promise<AIResponse> {
           { role: 'user', content: prompt },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: 8000,
       }),
     });
 
@@ -240,7 +230,7 @@ async function tryMinimax(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Tier 6: DeepSeek V3.2 (OpenRouter - Paid)
+// Tier 6: DeepSeek V3.2
 async function tryDeepSeekV3(prompt: string): Promise<AIResponse> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY not configured');
@@ -261,7 +251,7 @@ async function tryDeepSeekV3(prompt: string): Promise<AIResponse> {
           { role: 'user', content: prompt },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: 8000,
       }),
     });
 
@@ -286,7 +276,6 @@ async function tryDeepSeekV3(prompt: string): Promise<AIResponse> {
   }
 }
 
-// Main with 6-tier rotation
 export async function analyzeWithAI(prompt: string): Promise<AIResponse> {
   const providers: Array<() => Promise<AIResponse>> = [
     () => tryGemma31B(prompt),
